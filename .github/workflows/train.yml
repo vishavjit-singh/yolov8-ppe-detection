@@ -1,0 +1,88 @@
+# Train YOLOv8n on Construction-PPE on a CPU runner, export to ONNX, evaluate, and publish everything as
+# artifacts. This workflow was written without being able to run it locally; its first run is on GitHub.
+name: Train YOLOv8 (CPU)
+
+on:
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: "epochs"
+        default: "15"
+      imgsz:
+        description: "image size"
+        default: "416"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/train.yml"
+      - "config/**"
+      - "requirements-train.txt"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      EPOCHS: ${{ inputs.epochs || '15' }}
+      IMGSZ: ${{ inputs.imgsz || '416' }}
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: construction-ppe-e5817aa9
+      - name: Install (CPU PyTorch + pinned Ultralytics)
+        run: pip install -r requirements.txt -r requirements-train.txt
+      - name: Dataset
+        run: |
+          python -m ppe download
+          python -m ppe validate
+          python -m ppe data-yaml --out runs/data.yaml
+      - name: Train
+        run: >
+          yolo detect train data=runs/data.yaml model=yolov8n.pt epochs=$EPOCHS imgsz=$IMGSZ batch=16
+          device=cpu workers=2 project=runs name=ppe exist_ok=True seed=0 deterministic=True
+      - name: Validate (Ultralytics metrics)
+        run: >
+          yolo detect val model=runs/ppe/weights/best.pt data=runs/data.yaml imgsz=$IMGSZ device=cpu
+          project=runs name=val exist_ok=True
+      - name: Export to ONNX
+        run: yolo export model=runs/ppe/weights/best.pt format=onnx imgsz=$IMGSZ opset=12 simplify=False
+      - name: Evaluate the ONNX model through this repo's ONNX Runtime path
+        run: python -m ppe eval-onnx --model runs/ppe/weights/best.onnx --out reports/onnx_eval.json
+      - name: Predict + compliance on the validation images
+        run: python -m ppe predict data/construction-ppe/images/val --model runs/ppe/weights/best.onnx --out runs/predict
+      - name: Job summary
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          m = json.load(open("reports/onnx_eval.json"))
+          print(f"## ONNX model on {m['images']} validation images\n")
+          print(f"mAP50 **{m['map50']:.3f}** · mAP50-95 **{m['map50_95']:.3f}** · frame verdict agreement "
+                f"with ground truth **{m['frame_verdict_agreement_with_ground_truth']:.1%}**\n")
+          print("| class | AP50 | AP50-95 | instances |\n|---|---|---|---|")
+          for k, v in m["per_class"].items():
+              print(f"| {k} | {v['ap50']:.3f} | {v['ap50_95']:.3f} | {v['instances']} |")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: yolov8n-ppe
+          path: |
+            runs/ppe/weights/best.onnx
+            runs/ppe/weights/best.pt
+            runs/ppe/results.csv
+            runs/ppe/*.png
+            runs/val/
+            reports/onnx_eval.json
+            runs/predict/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: predictions
+          path: runs/predict/*.jpg

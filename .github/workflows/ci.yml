@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: lint + tests (synthetic data)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest -q
+
+  demo:
+    name: dataset checks + compliance demo (Construction-PPE)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: construction-ppe-e5817aa9
+      - run: pip install -r requirements.txt
+      - run: make demo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo
+          path: |
+            docs/images/*.png
+            reports/summary.json
+
+  docker:
+    name: serving image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t ppe .
+      - name: Health check (no model mounted → model_loaded false)
+        run: |
+          docker run -d --name ppe -p 8000:8000 ppe
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          curl -sf localhost:8000/health | grep '"model_loaded":false'
+          docker rm -f ppe

@@ -1,0 +1,21 @@
+# Site compliance policy: which gear each person must wear, and where on the body to look for it.
+# Regions are fractions of the person box height (0 = top of the box, 1 = bottom).
+person_class: Person
+required: [helmet, vest]            # missing either one is a violation when the negative class is seen
+optional: [gloves, boots, goggles]  # reported, never alerted on
+items:
+  helmet:  {positive: helmet,  negative: no_helmet, region: [0.00, 0.30]}
+  vest:    {positive: vest,    negative: no_vest,   region: [0.12, 0.70]}
+  gloves:  {positive: gloves,  negative: no_gloves, region: [0.20, 0.90]}
+  boots:   {positive: boots,   negative: no_boots,  region: [0.75, 1.00]}
+  goggles: {positive: goggles, negative: no_goggle, region: [0.00, 0.25]}
+association:
+  min_ioa: 0.5          # share of the gear box that must lie inside the person box
+  region_margin: 0.08   # extra slack around the body region, as a fraction of person height
+# "Missing-PPE labels refer to visible body regions; occlusion alone is not evidence of missing
+# equipment" (dataset README). So: no positive and no negative box → "unverified", not a violation.
+missing_is_violation: false
+alerts:
+  raise_after: 3        # N violating frames ...
+  window: 5             # ... within the last M frames raise an alert
+  clear_after: 5        # consecutive clean frames close it
