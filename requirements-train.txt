@@ -4,3 +4,4 @@ torch==2.5.1
 torchvision==0.20.1
 ultralytics==8.3.40
 onnx==1.17.0
+numpy<2.4                  # ultralytics 8.3.40 calls np.trapz, removed in NumPy 2.4
